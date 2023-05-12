@@ -1,107 +1,145 @@
-<script>
-const API_BASE_URL = "http://192.168.59.251:8000/api/todos";
+<script setup>
+import {ref, onMounted, reactive, watch} from 'vue';
+import { format, parseISO } from 'date-fns';
 
-export default {
-  data() {
-    return {
-      newTodo: "",
-      todos: [],
-    };
-  },
-  async created() {
-    try {
-      const response = await fetch(API_BASE_URL);
-      const data = await response.json();
-      this.todos = data.todos;
-    } catch (error) {
-      console.error("Error fetching todos:", error);
-    }
-  },
-  methods: {
-    async addTodo() {
-      try {
-        const response = await fetch(API_BASE_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: this.newTodo,
-            priority: 1,
-            order: this.todos.length + 1,
-          }),
-        });
-        const data = await response.json();
-        this.todos.push(data);
-        this.newTodo = "";
-      } catch (error) {
-        console.error("Error adding todo:", error);
-      }
-    },
-// udělat mazání
-    // udělat updatedAt
-    // připravil endpoint (query parameter) který schová udělané (defaultně)
-    // chceme button show completed
-    formatDate(dateString) {
-      const date = new Date(dateString);
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-    },
+const todos = reactive([]);
+const newTodo = ref('');
+const selectedSortOption = ref('default');
 
-    async toggleComplete(todo) {
-      try {
-        const requestData = {
-          completed_at: todo.completed_at ? null : new Date().toISOString(),
-        };
-        console.log("Request data:", requestData);
+function jsonHeaders() {
+  return {
+    'Content-Type': 'application/json',
+  };
+}
 
-        const response = await fetch(`${API_BASE_URL}/${todo.id}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestData),
-        });
+watch(selectedSortOption, (newSortOption) => {
+  switch (newSortOption) {
+    case 'name-asc':
+      todos.sort((a, b) => a.name.localeCompare(b.name));
+      break;
+    case 'name-desc':
+      todos.sort((a, b) => b.name.localeCompare(a.name));
+      break;
+    case 'creation-asc':
+      todos.sort((a, b) => parseISO(a.created_at) - parseISO(b.created_at));
+      break;
+    case 'creation-desc':
+      todos.sort((a, b) => parseISO(b.created_at) - parseISO(a.created_at));
+      break;
+    default:
+      break;
+  }
+});
 
-        if (!response.ok) {
-          console.log("Response status:", response.status, response.statusText);
-          console.log("Response text:", await response.text());
-          throw new Error("Error toggling todo completion: " + response.statusText);
-        }
+async function loadTodos() {
+  const response = await fetch('http://192.168.59.251:8000/api/todos?show_completed=1');
+  const body = await response.json();
 
-        const data = await response.json();
-        todo.completed_at = data.completed_at;
-      } catch (error) {
-        console.error("Error toggling todo completion:", error);
-      }
-    },
+  todos.splice(0, todos.length, ...body.todos.map(todo => ({
+    ...todo,
+    created_at: format(parseISO(todo.created_at), 'dd. mm. yyyy')
+  })));
+}
 
+async function createTodo(todo) {
+  const response = await fetch('http://192.168.59.251:8000/api/todos', {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify(todo)
+  });
 
-  },
-};
+  await response.json();
+}
+
+async function addTodo() {
+  await createTodo({
+    name: newTodo.value
+  })
+
+  newTodo.value = '';
+
+  await loadTodos();
+}
+
+async function toggleItem(todoId) {
+  const todo = todos.value.find((todo) => todo.id === todoId);
+
+  await fetch(`http://192.168.59.251:8000/api/todos/${todoId}`, {
+    method: 'PUT',
+    headers: jsonHeaders(),
+    body: JSON.stringify({
+      'completed_at': todo.completed_at === null
+          ? format(new Date(), 'yyyy-MM-dd HH:mm:ss')
+          : null
+    })
+  });
+
+  await loadTodos();
+}
+
+onMounted(() => {
+  loadTodos();
+});
 </script>
 
 <template>
-  <div id="app">
-    <h1>ToDoList</h1>
+  <header>
+    <h1>TodoList</h1>
+  </header>
+
+  <main>
     <form @submit.prevent="addTodo">
-      <input type="text" v-model="newTodo" placeholder="Write a to do item" required />
-      <button type="submit">Add</button>
+      <input
+          v-model="newTodo"
+          type="text"
+          placeholder="E.g. Buy milk"
+      >
+
+      <button type="submit">Add item</button>
     </form>
+
+    <label for="hide-completed">
+      <input
+          type="checkbox"
+          id="hide-completed"
+      >
+
+      Hide completed
+    </label>
+
+    Seřadit dle:
+    <select v-model="selectedSortOption">
+      <option value="default">--Vyberte--</option>
+      <option value="name-asc">Názvu (ASC)</option>
+      <option value="name-desc">Názvu (DESC)</option>
+      <option value="creation-asc">Data přidání (ASC)</option>
+      <option value="creation-desc">Data přidání (DESC)</option>
+    </select>
+
     <ul>
-      <li v-for="todo in todos" :key="todo.id">
-        <input type="checkbox" :checked="todo.completed_at" @change="toggleComplete(todo)" />
-        <span :class="{ completed: todo.completed_at }">{{ todo.name }}</span>
-        <span v-if="todo.completed_at"> (Completed on {{ formatDate(todo.completed_at) }})</span>
+      <li
+          v-for="todo in todos"
+          :key="todo.id"
+          :class="{ 'todo--completed': todo.completed_at !== null }"
+      >
+        <label :for="`todo_${todo.id}`">
+          <input
+              type="checkbox"
+              :checked="todo.completed_at !== null"
+              :id="`todo_${todo.id}`"
+              @change="toggleItem(todo.id)"
+          >
+          {{ todo.name }}
+
+          ({{ todo.created_at }})
+        </label>
       </li>
     </ul>
-  </div>
+  </main>
 </template>
 
-
-<style>
-.completed {
+<style scoped>
+.todo--completed {
   text-decoration: line-through;
   color: gray;
 }
