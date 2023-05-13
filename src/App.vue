@@ -1,10 +1,11 @@
 <script setup>
-import {ref, onMounted, reactive, watch} from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { format, parseISO } from 'date-fns';
 
-const todos = reactive([]);
+const todos = ref([]);
 const newTodo = ref('');
-const selectedSortOption = ref('default');
+const sort = ref('name-desc');
+const hideCompleted = ref(true);
 
 function jsonHeaders() {
   return {
@@ -12,33 +13,30 @@ function jsonHeaders() {
   };
 }
 
-watch(selectedSortOption, (newSortOption) => {
-  switch (newSortOption) {
-    case 'name-asc':
-      todos.sort((a, b) => a.name.localeCompare(b.name));
-      break;
-    case 'name-desc':
-      todos.sort((a, b) => b.name.localeCompare(a.name));
-      break;
-    case 'creation-asc':
-      todos.sort((a, b) => parseISO(a.created_at) - parseISO(b.created_at));
-      break;
-    case 'creation-desc':
-      todos.sort((a, b) => parseISO(b.created_at) - parseISO(a.created_at));
-      break;
-    default:
-      break;
-  }
-});
-
 async function loadTodos() {
-  const response = await fetch('http://192.168.59.251:8000/api/todos?show_completed=1');
+  let url = 'http://192.168.59.251:8000/api/todos';
+
+  const params = [];
+
+  if (sort.value !== 'default') {
+    const [orderBy, direction] = sort.value.split('-');
+
+    params.push(`order_by=${orderBy}`)
+    params.push(`direction=${direction}`)
+  }
+
+  // ...
+
+  params.push(`show_completed=${hideCompleted.value ? 0 : 1}`)
+
+  if (params.length > 0) {
+    url += '?' + params.join('&')
+  }
+
+  const response = await fetch(url);
   const body = await response.json();
 
-  todos.splice(0, todos.length, ...body.todos.map(todo => ({
-    ...todo,
-    created_at: format(parseISO(todo.created_at), 'dd. mm. yyyy')
-  })));
+  todos.value = body.todos;
 }
 
 async function createTodo(todo) {
@@ -80,6 +78,14 @@ async function toggleItem(todoId) {
 onMounted(() => {
   loadTodos();
 });
+
+watch(sort, () => {
+  loadTodos();
+})
+
+watch(hideCompleted, () => {
+  loadTodos();
+})
 </script>
 
 <template>
@@ -100,6 +106,7 @@ onMounted(() => {
 
     <label for="hide-completed">
       <input
+          v-model="hideCompleted"
           type="checkbox"
           id="hide-completed"
       >
@@ -108,12 +115,12 @@ onMounted(() => {
     </label>
 
     Seřadit dle:
-    <select v-model="selectedSortOption">
+    <select v-model="sort">
       <option value="default">--Vyberte--</option>
       <option value="name-asc">Názvu (ASC)</option>
       <option value="name-desc">Názvu (DESC)</option>
-      <option value="creation-asc">Data přidání (ASC)</option>
-      <option value="creation-desc">Data přidání (DESC)</option>
+      <option value="created_at-asc">Data přidání (ASC)</option>
+      <option value="created_at-desc">Data přidání (DESC)</option>
     </select>
 
     <ul>
@@ -131,7 +138,7 @@ onMounted(() => {
           >
           {{ todo.name }}
 
-          ({{ todo.created_at }})
+          ({{ format(parseISO(todo.created_at), 'dd. MM. yyyy') }})
         </label>
       </li>
     </ul>
